@@ -1,0 +1,316 @@
+---
+title: 'Step 3: Final Part of The Project'
+output: html_document
+date: "2025-11-30"
+---
+
+```{r}
+library(broom)   # tidy model output, OR table
+library(pROC)    # ROC / AUC
+
+# Importing data
+nhanes <- read.csv("NHANES_clean.csv", sep = ",", stringsAsFactors = FALSE) |> clean_names()
+
+# Renaming variables
+nhanes <- nhanes %>%
+  rename(
+    smoking = smq020,
+    marital_status = dmdmartl,
+    gender = riagendr,
+    age = ridageyr,
+    education = dmdeduc2,
+    weight_kg = bmxwt,
+    height_cm = bmxht,
+    bmi = bmxbmi,
+    alcohol_12mo = alq101
+  )
+```
+
+
+
+```{r}
+
+# ---- 6.1 Clinical hypertension definition ----
+
+nhanes <- nhanes %>%
+mutate(
+htn_bp = dplyr::case_when(
+bpxsy1 >= 140 | bpxsy2 >= 140 | bpxdi1 >= 90 | bpxdi2 >= 90 ~ 1,
+bpxsy1 < 140  | bpxsy2 < 140  | bpxdi1 < 90  | bpxdi2 < 90  ~ 0,
+TRUE ~ NA_real_
+),
+hypertension = factor(htn_bp,
+levels = c(0, 1),
+labels = c("No HTN", "HTN"))
+)
+
+table(nhanes$hypertension, useNA = "ifany")
+
+
+```
+
+```{r}
+# ---- 6.2 Define analysis dataset ----
+
+nhanes <- nhanes %>%
+mutate(
+# Passive smoking at home (NHANES HIQ210: "Does anyone smoke in your home?")
+passive_smoke = factor(hiq210,
+levels = c(1, 2),
+labels = c("Yes", "No"))
+)
+
+analysis_vars <- c("hypertension", "smoking", "alcohol_12mo",
+"passive_smoke", "bmi", "age", "gender",
+"education", "marital_status")
+
+nhanes_htn <- nhanes %>%
+dplyr::select(all_of(analysis_vars)) %>%
+drop_na()
+
+summary(nhanes_htn$hypertension)
+
+```
+
+```{r}
+# ---- 7.1 Age & BMI by hypertension status ----
+
+tt_age <- t.test(age ~ hypertension, data = nhanes_htn)
+tt_bmi <- t.test(bmi ~ hypertension, data = nhanes_htn)
+
+tt_age
+tt_bmi
+
+# Optional: non-parametric alternatives
+
+wilcox_age <- wilcox.test(age ~ hypertension, data = nhanes_htn)
+wilcox_bmi <- wilcox.test(bmi ~ hypertension, data = nhanes_htn)
+
+wilcox_age
+wilcox_bmi
+
+```
+
+
+```{r}
+# ---- 7.2.1 Smoking vs Hypertension ----
+
+tab_smoke_htn <- table(nhanes_htn$hypertension, nhanes_htn$smoking)
+tab_smoke_htn
+chisq_smoke <- chisq.test(tab_smoke_htn)
+chisq_smoke
+
+# ---- 7.2.2 Alcohol vs Hypertension ----
+
+tab_alc_htn <- table(nhanes_htn$hypertension, nhanes_htn$alcohol_12mo)
+tab_alc_htn
+chisq_alcohol <- chisq.test(tab_alc_htn)
+chisq_alcohol
+
+# ---- 7.2.3 Passive smoking vs Hypertension ----
+
+tab_passive_htn <- table(nhanes_htn$hypertension, nhanes_htn$passive_smoke)
+tab_passive_htn
+chisq_passive <- chisq.test(tab_passive_htn)
+chisq_passive
+
+```
+
+
+```{r}
+# ---- 8.1 BMI & Age by Smoking ----
+
+# ANOVA
+
+anova_bmi_smoke <- aov(bmi ~ smoking, data = nhanes_htn)
+anova_age_smoke <- aov(age ~ smoking, data = nhanes_htn)
+
+summary(anova_bmi_smoke)
+summary(anova_age_smoke)
+
+# Kruskal–Wallis
+
+kw_bmi_smoke <- kruskal.test(bmi ~ smoking, data = nhanes_htn)
+kw_age_smoke <- kruskal.test(age ~ smoking, data = nhanes_htn)
+
+kw_bmi_smoke
+kw_age_smoke
+
+# ---- 8.2 BMI & Age by Alcohol Use ----
+
+anova_bmi_alc <- aov(bmi ~ alcohol_12mo, data = nhanes_htn)
+anova_age_alc <- aov(age ~ alcohol_12mo, data = nhanes_htn)
+
+summary(anova_bmi_alc)
+summary(anova_age_alc)
+
+kw_bmi_alc <- kruskal.test(bmi ~ alcohol_12mo, data = nhanes_htn)
+kw_age_alc <- kruskal.test(age ~ alcohol_12mo, data = nhanes_htn)
+
+kw_bmi_alc
+kw_age_alc
+
+```
+
+
+```{r}
+# ---- 9.1 Create age cohorts ----
+
+nhanes_htn <- nhanes_htn %>%
+mutate(age_group = cut(
+age,
+breaks = c(20, 40, 60, Inf),
+labels = c("20–39", "40–59", "60+"),
+right = FALSE
+))
+
+table(nhanes_htn$age_group)
+
+```
+
+
+```{r}
+age_groups <- levels(nhanes_htn$age_group)
+
+for (g in age_groups) {
+cat("\n============================\n")
+cat("Age group:", g, "— Smoking vs HTN\n")
+tmp <- subset(nhanes_htn, age_group == g)
+tab <- table(tmp$hypertension, tmp$smoking)
+print(tab)
+if (all(dim(tab) == c(2, 2))) {
+print(chisq.test(tab))
+} else {
+cat("Not a full 2x2 table (some levels missing); Chi-square skipped.\n")
+}
+}
+
+```
+
+```{r}
+for (g in age_groups) {
+cat("\n============================\n")
+cat("Age group:", g, "— Alcohol vs HTN\n")
+tmp <- subset(nhanes_htn, age_group == g)
+tab <- table(tmp$hypertension, tmp$alcohol_12mo)
+print(tab)
+if (all(dim(tab) == c(2, 2))) {
+print(chisq.test(tab))
+} else {
+cat("Not a full 2x2 table (some levels missing); Chi-square skipped.\n")
+}
+}
+
+```
+
+```{r}
+# ---- 10.1 Fit logistic regression model ----
+
+logit_full <- glm(
+hypertension ~ smoking + alcohol_12mo + passive_smoke +
+bmi + age + gender + education + marital_status,
+data   = nhanes_htn,
+family = binomial
+)
+
+summary(logit_full)
+
+```
+
+
+```{r}
+# ---- 10.2 OR table ----
+
+or_table <- broom::tidy(
+logit_full,
+exponentiate = TRUE,
+conf.int    = TRUE
+)
+
+or_table
+
+# In the Rmd you can display nicely:
+
+# knitr::kable(or_table, digits = 3, caption = "Adjusted Odds Ratios for Hypertension")
+
+```
+
+
+
+```{r}
+# ---- 11.1 Predicted probabilities & classes ----
+
+nhanes_htn <- nhanes_htn %>%
+mutate(
+pred_prob  = predict(logit_full, type = "response"),
+pred_class = if_else(pred_prob >= 0.5, "HTN", "No HTN") %>%
+factor(levels = levels(hypertension))
+)
+
+# ---- 11.2 Confusion matrix ----
+
+conf_mat <- table(
+Observed  = nhanes_htn$hypertension,
+Predicted = nhanes_htn$pred_class
+)
+conf_mat
+
+# ---- 11.3 Performance metrics ----
+
+accuracy    <- sum(diag(conf_mat)) / sum(conf_mat)
+sensitivity <- conf_mat["HTN", "HTN"] / sum(conf_mat["HTN", ])
+specificity <- conf_mat["No HTN", "No HTN"] / sum(conf_mat["No HTN", ])
+
+accuracy
+sensitivity
+specificity
+
+# ---- 11.4 ROC curve & AUC ----
+
+roc_htn   <- roc(nhanes_htn$hypertension, nhanes_htn$pred_prob)
+auc_value <- auc(roc_htn)
+auc_value
+
+plot(roc_htn, print.auc = TRUE, main = "ROC Curve for Hypertension Model")
+
+```
+
+
+
+```{r}
+summary_table <- tibble::tibble(
+variable  = c("Age (HTN vs No HTN)",
+"BMI (HTN vs No HTN)",
+"Smoking vs Hypertension",
+"Alcohol vs Hypertension",
+"Passive smoking vs Hypertension"),
+test      = c("Two-sample t-test",
+"Two-sample t-test",
+"Chi-square test of independence",
+"Chi-square test of independence",
+"Chi-square test of independence"),
+statistic = c(unname(tt_age$statistic),
+unname(tt_bmi$statistic),
+unname(chisq_smoke$statistic),
+unname(chisq_alcohol$statistic),
+unname(chisq_passive$statistic)),
+p_value   = c(tt_age$p.value,
+tt_bmi$p.value,
+chisq_smoke$p.value,
+chisq_alcohol$p.value,
+chisq_passive$p.value)
+) %>%
+mutate(
+significant_0_05 = if_else(p_value < 0.05, "Yes", "No")
+)
+
+summary_table
+
+# In Rmd:
+
+# knitr::kable(summary_table, digits = 3,
+
+# caption = "Summary of statistical tests for hypertension.")
+
+```
+
