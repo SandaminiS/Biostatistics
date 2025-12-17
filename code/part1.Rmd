@@ -1,0 +1,863 @@
+---
+title: "Step 2: Data Preparation & Exploratory Data Analysis"
+output:
+  html_document: default
+  pdf_document: default
+author: Poorna Sandamini Senaratne
+---
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(ggplot2)
+library(scales)
+library(dplyr)
+library(tidyr)
+
+setwd("C:\\Users\\sanda\\OneDrive - University of Central Florida\\UCF\\8_Fall_2025\\Courses\\STA5176\\Project")
+```
+
+
+## 1. Research Question 
+
+What are the associations of alcohol use patterns and passive smoking exposure with hypertension among U.S. adults? Do these effects differ by demographic characteristics such as sex and age?
+
+
+## 2. Handling Missing Values
+
+```{r}
+# Loading dataset
+nhanes_1 <- read.csv("NHANES.csv", sep = ",", stringsAsFactors = FALSE)
+
+# Variables of interest
+vars_to_check <- c("SMQ020", "DMDMARTL", "RIAGENDR", "DMDEDUC2",
+                   "ALQ101", "RIDAGEYR", "BMXWT", "BMXHT", "BMXBMI")
+
+# Verify existing variables
+existing_vars <- intersect(vars_to_check, names(nhanes_1))
+missing_vars  <- setdiff(vars_to_check, names(nhanes_1))
+
+# Proceed if some variables are found
+if (length(existing_vars) > 0) {
+  
+  # Summarizing missing counts and percentages
+  missing_summary <- nhanes_1 %>%
+    summarise(across(all_of(existing_vars),
+                     list(
+                       n_missing  = ~sum(is.na(.)),
+                       pct_missing = ~100 * mean(is.na(.))
+                     ),
+                     .names = "{.col}.{.fn}")) %>%
+    pivot_longer(
+      everything(),
+      names_to = c("variable", ".value"),
+      names_sep = "\\."
+    ) %>%
+    arrange(desc(pct_missing))
+  
+  print(missing_summary, n = Inf)
+  
+  # Droping rows with missing values in these columns
+  nhanes_clean <- nhanes_1 %>% drop_na(all_of(existing_vars))
+  
+} else {
+  cat("None of the specified variables exist in the dataset.\n")
+}
+
+write.csv(nhanes_clean, "NHANES_clean.csv", row.names = FALSE)
+```
+
+Since the missing values are less than 10%, the rows with these missing values were deleted from the dataset.
+
+```{r}
+# Importing data
+nhanes <- read.csv("NHANES_clean.csv", sep = ",", stringsAsFactors = FALSE) |> clean_names()
+
+# Renaming variables
+nhanes <- nhanes %>%
+  rename(
+    smoking = smq020,
+    marital_status = dmdmartl,
+    gender = riagendr,
+    age = ridageyr,
+    education = dmdeduc2,
+    weight_kg = bmxwt,
+    height_cm = bmxht,
+    bmi = bmxbmi,
+    alcohol_12mo = alq101
+  )
+
+```
+
+Variable Descriptions are given below for ease of reference.
+
+| Variable     | Description                                                                                        | Coding / Unit                                                                                                                                                                |
+|--------------|----------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **SMQ020**   | **Smoking status** – whether the respondent has ever smoked at least 100 cigarettes in their life. | 1 = Yes · 2 = No · 7 = Refused · 9 = Don’t know                                                                                                                              |
+| **DMDMARTL** | **Marital status** of the respondent.                                                              | 1 = Married · 2 = Widowed · 3 = Divorced · 4 = Separated · 5 = Never married · 6 = Living with partner · 77 = Refused                                                        |
+| **RIAGENDR** | **Gender** of the participant.                                                                     | 1 = Male · 2 = Female                                                                                                                                                        |
+| **DMDEDUC2** | **Education level** for adults aged ≥ 20 years.                                                    | 1 = Less than 9th grade · 2 = 9–11th grade (no diploma) · 3 = High school graduate/GED · 4 = Some college/AA degree · 5 = College graduate or above · 9 = Don’t know/Refused |
+| **ALQ101**   | **Alcohol use** – whether the respondent had at least 12 alcoholic drinks in the past year.        | 1 = Yes · 2 = No · 9 = Don’t know/Refused                                                                                                                                    |
+| **RIDAGEYR** | **Age** of the participant (in years).                                                             | Continuous numeric variable (years)                                                                                                                                          |
+| **BMXWT**    | **Weight** measured during the physical exam.                                                      | Continuous numeric variable (kilograms [kg])                                                                                                                                 |
+| **BMXHT**    | **Standing height** measured during the physical exam.                                             | Continuous numeric variable (centimeters [cm])                                                                                                                               |
+| **BMXBMI**   | **Body Mass Index** computed from height and weight.                                               | Continuous numeric variable (kg/m²)                                                                                                                                          |
+
+
+## 3. Response Variables
+
+In relation to the research question, there are two key response variables of interest: smoking and alcohol use.
+
+These variables represent major lifestyle behaviors that may influence cardiovascular health outcomes, including hypertension.
+
+The analyses will therefore focus on:
+
+Smoking status (SMQ020): whether the participant has ever smoked at least 100 cigarettes in their lifetime.
+
+Alcohol use (ALQ101): whether the participant has consumed at least 12 alcoholic drinks within the past year.
+
+#### 3.1. Smoking
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(smoking), fill = as.factor(smoking))) +
+  geom_bar() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Smoked at least 100 cigarettes in life",
+       x = "Smoking", y = "Count",
+       fill = "Smoking"
+       ) +
+  theme_minimal()
+
+table(as.factor(nhanes$smoking))
+```
+
+The bar chart above illustrates the distribution of smoking status among participants in the NHANES dataset. A total of 2,103 individuals (42.8%) reported that they had smoked at least 100 cigarettes in their lifetime (coded as 1 = Yes), while 2,796 individuals (57.0%) indicated that they had never smoked (coded as 2 = No). Only a very small proportion of respondents (less than 1%) either refused to answer (code 7) or did not know (code 9). Overall, the majority of the sample are non-smokers, suggesting a relatively lower prevalence of lifetime smoking among the surveyed U.S. adults.
+
+#### 3.2. Alcohol use
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(alcohol_12mo), fill = as.factor(alcohol_12mo))) +
+  geom_bar() +
+  labs(title = "Had at least 12 alcoholic drinks in 1 year?",
+       x = "Alcohol Use", y = "Count",
+       fill = "Alcohol Use"
+       ) +
+  theme_minimal()
+
+table(nhanes$alcohol_12mo)
+```
+
+The bar chart displays the distribution of participants based on their response to alcohol consumption within the past 12 months. The majority of participants reported drinking alcohol (coded as “1”), with 3,347 individuals (approximately 68%) indicating alcohol use. In contrast, 1,558 participants (about 32%) reported not consuming alcohol (coded as “2”). Only 3 individuals did not provide a response or were categorized as “unknown” (coded as “9”). This distribution indicates that alcohol consumption is relatively common among the surveyed participants, with more than two-thirds reporting alcohol use within the past year.
+
+## 4. Univariate Analysis
+
+### 4.1 Categorical Variables
+
+#### 4.1.1. Frequency tables
+
+```{r}
+freq_table <- function(df, var){
+  cat("\n-----------------------------\n")
+  cat("Variable:", var, "\n")
+  print(table(df[[var]], useNA = "ifany"))
+  cat("\nProportion (%):\n")
+  print(round(prop.table(table(df[[var]])) * 100, 1))
+  cat("-----------------------------\n")
+}
+
+categorical_vars <- c("marital_status", "gender", "education")
+
+for (v in categorical_vars) freq_table(nhanes, v)
+```
+
+Marital Status:
+From the table it can be seen that roughly half of the people are married, about 18% never married, and 11% are divorced. Moreover, smaller proportions are widowed (7%) or living with a partner (10%). This means that the data include a mix of marital statuses, dominated by married individuals.
+
+Gender:
+The results show that the gender distribution is almost even, with slightly more females (51%) than males (49%). Therefore it can be stated that the dataset is gender-balanced.
+
+Education Level:
+According to the he frequency table of education level, around 30% completed some college/associate degree, and 25% are college graduates or higher. Also, roughly 23% have only a high school education and about 24% have less than a high school education. Hence, we could say that the sample skews toward participants with at least some post-secondary education.
+
+#### 4.1.2. Visualizations
+
+##### 4.1.2.1. Marital Status
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(marital_status), fill = as.factor(marital_status))) +
+  geom_bar() +
+  labs(title = "Marital Status Distribution", x = "Marital Status", y = "Count",
+       fill = "Marital Status"
+       ) +
+  theme_minimal()
+
+table(as.factor(nhanes$marital_status))
+```
+
+The bar chart above displays the distribution of marital status among participants in the NHANES dataset. The largest group of respondents are married individuals (code 1), totaling approximately 2,468 participants (about 50%). The next most common categories are never married (code 5; ~18%), followed by divorced (code 3; ~11%) and living with a partner (code 6; ~10%). Smaller proportions of participants are widowed (code 2; ~7%) or separated (code 4; ~4%), while only one respondent refused to answer (code 77). Overall, the data indicate that half of the sample are married, with the remainder distributed across various unmarried categories.
+
+
+##### 4.1.2.2. Gender
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(gender), fill = as.factor(gender))) +
+  geom_bar() +
+  labs(title = "Gender Distribution", x = "Gender", y = "Count",
+       fill = "Gender"
+       ) +
+  theme_minimal()
+
+table(as.factor(nhanes$gender))
+```
+
+The bar chart above shows the gender distribution of participants in the NHANES dataset. The dataset consists of 2,390 males (code 1) and 2,518 females (code 2), representing approximately 48.7% males and 51.3% females. Overall, the gender distribution is nearly equal, with only a slight predominance of females.
+
+##### 4.1.2.3. Education Level
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(education), fill = as.factor(education))) +
+  geom_bar() +
+  labs(title = "Education Level Distribution", x = "Education Level", y = "Count",
+       fill = "Education Level"
+       ) +
+  theme_minimal()
+
+table(as.factor(nhanes$education))
+```
+
+The bar chart above presents the distribution of education levels among participants in the NHANES dataset. The largest group of respondents completed some college or obtained an associate degree (code 4), totaling 1,467 individuals (approximately 30%). This is followed by college graduates or those with higher education (code 5), comprising 1,210 participants (about 25%). Additionally, 1,081 respondents (22%) are high school graduates or GED holders (code 3), while 584 (12%) and 563 (11%) participants reported 9–11th grade without a diploma (code 2) and less than 9th grade (code 1) respectively. Only three participants (0.1%) selected “don’t know or refused” (code 9). Overall, the data indicate that the majority of adults in this sample have at least completed high school, with more than half having some college or higher education.
+
+
+### 4.2. Numerical Variables
+
+#### 4.2.1. Summary Statistics 
+
+```{r}
+num_vars <- c("age", "height_cm", "weight_kg", "bmi")
+
+summary(nhanes[num_vars])
+
+```
+
+The summary statistics above describe the distribution of the continuous variables: age, height, weight, and Body Mass Index (BMI), among participants in the NHANES dataset.
+
+Age: The participants’ ages range from 20 to 80 years, with a mean of approximately 50 years and a median of 50 years, indicating a fairly balanced distribution around middle-aged adults.
+
+Height: The values range from 129.7 cm to 202.7 cm, with an average of about 166.2 cm, suggesting that most participants fall within the expected adult height range. 
+
+Weight: These values varies from 32.4 kg to 198.9 kg, with a mean of 82.2 kg, indicating substantial variation likely due to differences in gender and body composition.
+
+BMI: The BMI ranges from 14.5 to 67.3 kg/m², with an average of 29.7 kg/m², placing the mean participant within the overweight category according to standard BMI classifications. This suggests that, on average, people sampled exhibit slightly higher body mass values, consistent with national trends of rising BMI levels in U.S. adults.
+
+
+#### 4.2.2. Histograms 
+
+##### 4.2.2.1. Age
+
+```{r}
+ggplot(nhanes, aes(x = age)) +
+  geom_histogram(bins = 30, fill = "#0072B2", color = "white") +
+  labs(title = "Distribution of Age", x = "Age (years)", y = "Count") +
+  theme_minimal()
+
+```
+
+The histogram above displays the distribution of age among participants in the NHANES dataset. The ages range from 20 to 80 years. The overall distribution appears to be approximately uniform, indicating that participants are fairly evenly represented across most adult age groups. However, there are two noticeable peaks around 60 years and 80 years, suggesting slightly higher participation among individuals in these older age brackets. Overall, the data show a well-distributed age composition, ensuring that adults from both younger and older age groups are adequately represented for subsequent analyses.
+
+
+##### 4.2.2.2. Height
+
+```{r}
+ggplot(nhanes, aes(x = height_cm)) +
+  geom_histogram(bins = 30, fill = "#56B4E9", color = "white") +
+  labs(title = "Distribution of Height", x = "Height (cm)", y = "Count") +
+  theme_minimal()
+
+```
+
+The histogram above shows the distribution of height among participants in the NHANES dataset. The heights range approximately from 130 cm to 195 cm, with most participants clustered around 165–170 cm. The distribution exhibits a roughly bell-shaped (normal) pattern, indicating that height is symmetrically distributed around the mean. This suggests that most participants have average adult heights, while relatively few individuals fall into the extremely short or tall categories.
+
+
+##### 4.2.2.3. Weight
+
+```{r}
+ggplot(nhanes, aes(x = weight_kg)) +
+  geom_histogram(bins = 30, fill = "#009E73", color = "white") +
+  labs(title = "Distribution of Weight", x = "Weight (kg)", y = "Count") +
+  theme_minimal()
+```
+
+The histogram above illustrates the distribution of weight among participants in the NHANES dataset. The weights range from approximately 30 kg to nearly 200 kg, with the majority of participants weighing between 60 kg and 100 kg. The distribution is right-skewed. This skewness indicates that most individuals fall within the lower to middle weight ranges, while a smaller number of participants have substantially higher body weights.
+
+##### 4.2.2.4. BMI
+
+```{r}
+ggplot(nhanes, aes(x = bmi)) +
+  geom_histogram(bins = 30, fill = "#D55E00", color = "white") +
+  labs(title = "Distribution of BMI", x = "BMI", y = "Count") +
+  theme_minimal()
+```
+
+The histogram above shows the distribution of Body Mass Index (BMI) among participants in the NHANES dataset. The BMI values range from approximately 14 to 67 kg/m², with most participants clustered between 20 and 35 kg/m². The distribution is right-skewed, indicating that while the majority of individuals fall within the normal weight (18.5–24.9) and overweight (25–29.9) categories, there are some participants with higher BMI values classified as obese (≥30) or severely obese. The peak of the distribution occurs around a BMI of 28–30 kg/m², suggesting that a large proportion of respondents are slightly above the normal weight range.
+
+
+## 5. Bivariate Analysis
+
+```{r}
+# Recoding categorical variables 
+nhanes <- nhanes %>%
+  mutate(
+    gender = factor(gender, levels = c(1, 2), labels = c("Male", "Female")),
+    smoking = factor(smoking, levels = c(1, 2), labels = c("Yes", "No")),
+    alcohol_12mo = factor(alcohol_12mo, levels = c(1, 2), labels = c("Yes", "No")),
+    education = factor(education,
+                       levels = 1:5,
+                       labels = c("Less than 9th", "9–11th", "High School/GED",
+                                  "Some College/AA", "College Grad or above")),
+    marital_status = factor(marital_status,
+                            levels = 1:6,
+                            labels = c("Married", "Widowed", "Divorced",
+                                       "Separated", "Never Married", "Living with partner"))
+  )
+
+
+```
+
+
+### 5.1. Smoking
+
+#### 5.1.1. Smoking vs Numerical Variables
+
+##### 5.1.1.1. Age vs Smoking Status
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(smoking), y = age, fill = as.factor(smoking))) +
+  geom_boxplot(alpha = 0.6) +
+  labs(
+    title = "Age Distribution by Smoking Status",
+    x = "Smoking Status",
+    y = "Age (years)",
+    fill = "Smoking"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+The boxplot illustrates the age distribution among participants categorized by smoking status. Individuals who reported smoking (“Yes”) tend to be older on average than non-smokers. The median age of smokers is approximately 53 years, compared to about 48 years for non-smokers. The interquartile range (IQR) for smokers is also slightly narrower. In contrast, non-smokers exhibit a wider spread of ages. Overall, this visualization supports the earlier statistical finding that smokers tend to be significantly older than non-smokers
+
+
+##### 5.1.1.2. Height vs Smoking Status
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(smoking), y = height_cm, fill = as.factor(smoking))) +
+  geom_boxplot(alpha = 0.6) +
+  labs(
+    title = "Height Distribution by Smoking Status",
+    x = "Smoking Status",
+    y = "Height (cm)",
+    fill = "Smoking"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+
+The boxplot illustrates the height distribution among participants grouped by smoking status. Individuals who reported smoking (“Yes”) appear to be slightly taller on average than non-smokers. The median height of smokers is around 168 cm, while non-smokers have a median height of approximately 165 cm. Although the difference in medians is modest, the overall distribution for smokers is shifted slightly upward. Both groups show similar variability, with a few outliers at both the lower and upper ends of the height range.
+
+
+##### 5.1.1.3. Weight vs Smoking Status
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(smoking), y = weight_kg, fill = as.factor(smoking))) +
+  geom_boxplot(alpha = 0.6) +
+  labs(
+    title = "Weight Distribution by Smoking Status",
+    x = "Smoking Status",
+    y = "Weight (kg)",
+    fill = "Smoking"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+
+The boxplot above illustrates the distribution of weight among participants across smoking categories. On average, individuals who reported smoking (“Yes”) tend to have slightly higher median weights compared to non-smokers. The median weight for smokers is around 80–85 kg, while for non-smokers it is slightly lower, around 78–80 kg. Although the difference in medians is relatively small, the spread appears similar between the two groups. Both groups also exhibit a number of upper outliers.
+
+
+##### 5.1.1.4. BMI vs Smoking Status
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(smoking), y = bmi, fill = as.factor(smoking))) +
+  geom_boxplot(alpha = 0.6) +
+  labs(
+    title = "BMI Distribution by Smoking Status",
+    x = "Smoking Status",
+    y = "BMI (kg/m²)",
+    fill = "Smoking"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+
+The boxplot above illustrates the distribution of Body Mass Index (BMI) among participants grouped by smoking status. Overall, the median BMI values for smokers and non-smokers are very similar, both falling around 29–30 kg/m², which lies within the overweight range. The interquartile ranges for both groups are nearly identical. Both distributions exhibit several upper outliers.
+
+
+#### 5.1.2. Smoking vs Categorical Variables 
+
+##### 5.1.3.1. Smoking vs Gender
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(gender), fill = as.factor(smoking))) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Smoking by Gender", x = "Gender", y = "Proportion",
+       fill = "Smoking"
+       ) +
+  theme_minimal()
+```
+
+The stacked bar chart above illustrates the proportion of smokers and non-smokers by gender. It shows that males have a higher proportion of smokers compared to females, while a larger percentage of females are non-smokers. Specifically, the smoking prevalence among men appears close to half of the male population, whereas the proportion of female smokers is notably lower. Overall, the visualization highlights a clear gender disparity in smoking habits, with men being more likely to smoke than women.
+
+
+##### 5.1.3.2. Smoking vs Education
+
+```{r}
+ggplot(nhanes, aes(x = as.factor(education), fill = as.factor(smoking))) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Smoking by Education Level", x = "Education Level", y = "Proportion",
+       fill = "Smoking"
+       ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+The stacked bar chart above illustrates the relationship between smoking status and education level among participants. A clear pattern can be seen here, the individuals with lower levels of education tend to have higher rates of smoking, while those with higher educational attainment are less likely to smoke. Participants with less than a 9th-grade education or some high school education show the highest proportions of smokers. The prevalence of smoking gradually decreases among those with a high school diploma, some college or an associate degree, and reaches its lowest among participants who are college graduates or above.
+
+
+##### 5.1.3.3. Smoking vs Marital Status
+
+```{r}
+ggplot(nhanes, aes(x = marital_status, fill = smoking)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Smoking by Marital Status",
+    x = "Marital Status",
+    y = "Proportion",
+    fill = "Smoking"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)  # rotate labels
+  )
+
+```
+
+The stacked bar chart above displays the distribution of smoking status across different marital status categories. The visualization reveals notable differences in smoking behavior depending on marital status.
+
+Individuals who are divorced, separated, or never married show a higher proportion of smokers, whereas those who are married or living with a partner tend to have lower smoking rates. Widowed individuals also display moderately high smoking prevalence, though slightly less than those who are divorced or separated.
+
+This pattern suggests that marital or partnership stability may be associated with lower smoking prevalence, potentially reflecting social or emotional support that encourages healthier behaviors. Conversely, individuals who are not currently in a marital relationship may experience lifestyle or stress-related factors that contribute to higher smoking rates.
+
+
+### 5.2. Alcohol Use
+
+#### 5.2.1. Alcohol Use vs Numerical Variables
+
+##### 5.2.1.1. Age vs Alcohol Use
+
+```{r}
+ggplot(nhanes, aes(x = alcohol_12mo, y = age, fill = alcohol_12mo)) +
+  geom_boxplot(alpha = 0.6) +
+  labs(title = "Age Distribution by Alcohol Use", x = "Alcohol Use", y = "Age",
+       fill = "Alcohol Use"
+       ) +
+  theme_minimal()
+```
+
+The boxplot above shows the distribution of age among participants categorized by alcohol consumption status. Individuals who reported no alcohol use (“No”) tend to be older on average than those who reported drinking alcohol (“Yes”). The median age for non-drinkers is around 55 years, while that for drinkers is slightly lower, around 50 years. The interquartile range for both groups is wide. Participants with missing alcohol use information (“NA”) also appear to be older on average than either group. Overall, the visualization suggests that alcohol consumption is somewhat more common among younger adults, whereas non-drinking behavior is more prevalent among older individuals in this dataset.
+
+
+##### 5.2.1.2. Weight vs Alcohol Use
+
+```{r}
+ggplot(nhanes, aes(x = alcohol_12mo, y = weight_kg, fill = alcohol_12mo)) +
+  geom_boxplot(alpha = 0.6) +
+  labs(title = "Weight Distribution by Alcohol Use", x = "Alcohol Use", y = "Weight",
+       fill = "Alcohol Use"
+       ) +
+  theme_minimal()
+```
+
+The boxplot above illustrates the distribution of weight (kg) among participants based on their alcohol consumption status. Participants who reported alcohol consumption (“Yes”) tend to have a slightly higher median weight compared to those who did not consume alcohol (“No”). However, the overall variability in weight appears similar between the two groups. Both categories exhibit numerous upper outliers, indicating the presence of individuals with significantly higher body weights. Participants who specified that they don't know about their alcohol use also display a median weight similar to that of drinkers, but with a slightly narrower distribution.  
+
+
+##### 5.2.1.3. Height vs Alcohol Use
+
+```{r}
+ggplot(nhanes, aes(x = alcohol_12mo, y = height_cm, fill = alcohol_12mo)) +
+  geom_boxplot(alpha = 0.6) +
+  labs(title = "Height Distribution by Alcohol Use", x = "Alcohol Use", y = "Height",
+       fill = "Alcohol Use"
+       ) +
+  theme_minimal()
+```
+
+The boxplot above displays the distribution of height (cm) among participants categorized by alcohol consumption status. Individuals who reported alcohol use (“Yes”) tend to be slightly taller on average than those who reported not consuming alcohol (“No”). The median height for drinkers is higher than that of non-drinkers, and the interquartile range is also slightly wider, indicating greater variation in height within the drinking group. Participants with missing alcohol use information (“NA”) have median heights close to those who consume alcohol, though the variability within this group appears smaller.
+
+
+
+##### 5.2.1.2. BMI vs Alcohol Use
+
+```{r}
+ggplot(nhanes, aes(x = alcohol_12mo, y = bmi, fill = alcohol_12mo)) +
+  geom_boxplot(alpha = 0.6) +
+  labs(title = "BMI Distribution by Alcohol Use", x = "Alcohol Use", y = "BMI",
+       fill = "Alcohol Use"
+       ) +
+  theme_minimal()
+```
+
+The boxplot above displays the distribution of Body Mass Index (BMI) among participants grouped by alcohol consumption status. The median BMI values for both alcohol users (“Yes”) and non-users (“No”) are quite similar. Both categories show a wide range of BMI values with a comparable interquartile range. There are several upper outliers in both groups. Participants with missing alcohol use data (“NA”) exhibit slightly higher median BMI values.
+
+
+#### 5.2.2. Alcohol Use vs Categorical Variables
+
+##### 5.2.2.1. Alcohol vs Gender
+
+```{r}
+ggplot(nhanes, aes(x = gender, fill = alcohol_12mo)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Alcohol Use by Gender", x = "Gender", y = "Proportion",
+       fill = "Alcohol Use"
+       ) +
+  theme_minimal()
+```
+
+The stacked bar chart illustrates the proportion of participants who reported alcohol consumption in the past year, categorized by gender. A noticeably higher proportion of males reported alcohol use compared to females. In contrast, females had a greater proportion of non-drinkers. This suggests that alcohol consumption is more prevalent among males in the dataset, while females are more likely to abstain from alcohol. 
+
+
+##### 5.2.2.2. Alcohol vs Education
+
+```{r}
+ggplot(nhanes, aes(x = education, fill = alcohol_12mo)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Alcohol Use by Education Level", x = "Education Level", y = "Proportion",
+       fill = "Alcohol Use"
+       ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+The stacked bar chart illustrates the proportion of participants reporting alcohol use across different education levels. The proportion of alcohol users (“Yes”) increases with higher educational attainment. Individuals with at least some college education or a college degree show the highest rates of alcohol consumption, while those with less than a high school education exhibit lower proportions of alcohol use.Conversely, the percentage of participants who reported not using alcohol (“No”) tends to decrease as education level rises. Participants with missing education data (“NA”) show a different distribution, with a relatively balanced mix of users and non-users.
+
+
+##### 5.2.2.3. Alcohol vs Marital Status
+
+```{r}
+ggplot(nhanes, aes(x = marital_status, fill = alcohol_12mo)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Alcohol Use by Marital Status", x = "Marital Status", y = "Proportion",
+       fill = "Alcohol Use"
+       ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+The stacked bar chart displays the proportion of participants who reported alcohol consumption within the past year, categorized by marital status. The results show that alcohol use is relatively common across all marital categories, though there are slight differences in proportions. Participants who are widowed show a more balanced split between alcohol users (“Yes”) and non-users (“No”), whereas other groups such as married, divorced, separated, never married, and living with a partner report a higher proportion of alcohol use. Among these, individuals who are living with a partner or never married appear to have the highest prevalence of alcohol use. Overall, the chart indicates that alcohol consumption is consistently high across most marital groups, with only widowed participants showing a lower tendency to consume alcohol.
+
+```{r}
+colnames(nhanes)
+```
+
+
+```{r}
+library(broom)   # tidy model output, OR table
+library(pROC)    # ROC / AUC
+
+# ---- 6.1 Clinical hypertension definition ----
+
+nhanes <- nhanes %>%
+mutate(
+htn_bp = dplyr::case_when(
+bpxsy1 >= 140 | bpxsy2 >= 140 | bpxdi1 >= 90 | bpxdi2 >= 90 ~ 1,
+bpxsy1 < 140  | bpxsy2 < 140  | bpxdi1 < 90  | bpxdi2 < 90  ~ 0,
+TRUE ~ NA_real_
+),
+hypertension = factor(htn_bp,
+levels = c(0, 1),
+labels = c("No HTN", "HTN"))
+)
+
+table(nhanes$hypertension, useNA = "ifany")
+
+
+```
+
+```{r}
+# ---- 6.2 Define analysis dataset ----
+
+nhanes <- nhanes %>%
+mutate(
+# Passive smoking at home (NHANES HIQ210: "Does anyone smoke in your home?")
+passive_smoke = factor(hiq210,
+levels = c(1, 2),
+labels = c("Yes", "No"))
+)
+
+analysis_vars <- c("hypertension", "smoking", "alcohol_12mo",
+"passive_smoke", "bmi", "age", "gender",
+"education", "marital_status")
+
+nhanes_htn <- nhanes %>%
+dplyr::select(all_of(analysis_vars)) %>%
+drop_na()
+
+summary(nhanes_htn$hypertension)
+
+```
+
+```{r}
+# ---- 7.1 Age & BMI by hypertension status ----
+
+tt_age <- t.test(age ~ hypertension, data = nhanes_htn)
+tt_bmi <- t.test(bmi ~ hypertension, data = nhanes_htn)
+
+tt_age
+tt_bmi
+
+# Optional: non-parametric alternatives
+
+wilcox_age <- wilcox.test(age ~ hypertension, data = nhanes_htn)
+wilcox_bmi <- wilcox.test(bmi ~ hypertension, data = nhanes_htn)
+
+wilcox_age
+wilcox_bmi
+
+```
+
+
+```{r}
+# ---- 7.2.1 Smoking vs Hypertension ----
+
+tab_smoke_htn <- table(nhanes_htn$hypertension, nhanes_htn$smoking)
+tab_smoke_htn
+chisq_smoke <- chisq.test(tab_smoke_htn)
+chisq_smoke
+
+# ---- 7.2.2 Alcohol vs Hypertension ----
+
+tab_alc_htn <- table(nhanes_htn$hypertension, nhanes_htn$alcohol_12mo)
+tab_alc_htn
+chisq_alcohol <- chisq.test(tab_alc_htn)
+chisq_alcohol
+
+# ---- 7.2.3 Passive smoking vs Hypertension ----
+
+tab_passive_htn <- table(nhanes_htn$hypertension, nhanes_htn$passive_smoke)
+tab_passive_htn
+chisq_passive <- chisq.test(tab_passive_htn)
+chisq_passive
+
+```
+
+
+```{r}
+# ---- 8.1 BMI & Age by Smoking ----
+
+# ANOVA
+
+anova_bmi_smoke <- aov(bmi ~ smoking, data = nhanes_htn)
+anova_age_smoke <- aov(age ~ smoking, data = nhanes_htn)
+
+summary(anova_bmi_smoke)
+summary(anova_age_smoke)
+
+# Kruskal–Wallis
+
+kw_bmi_smoke <- kruskal.test(bmi ~ smoking, data = nhanes_htn)
+kw_age_smoke <- kruskal.test(age ~ smoking, data = nhanes_htn)
+
+kw_bmi_smoke
+kw_age_smoke
+
+# ---- 8.2 BMI & Age by Alcohol Use ----
+
+anova_bmi_alc <- aov(bmi ~ alcohol_12mo, data = nhanes_htn)
+anova_age_alc <- aov(age ~ alcohol_12mo, data = nhanes_htn)
+
+summary(anova_bmi_alc)
+summary(anova_age_alc)
+
+kw_bmi_alc <- kruskal.test(bmi ~ alcohol_12mo, data = nhanes_htn)
+kw_age_alc <- kruskal.test(age ~ alcohol_12mo, data = nhanes_htn)
+
+kw_bmi_alc
+kw_age_alc
+
+```
+
+
+```{r}
+# ---- 9.1 Create age cohorts ----
+
+nhanes_htn <- nhanes_htn %>%
+mutate(age_group = cut(
+age,
+breaks = c(20, 40, 60, Inf),
+labels = c("20–39", "40–59", "60+"),
+right = FALSE
+))
+
+table(nhanes_htn$age_group)
+
+```
+
+
+```{r}
+age_groups <- levels(nhanes_htn$age_group)
+
+for (g in age_groups) {
+cat("\n============================\n")
+cat("Age group:", g, "— Smoking vs HTN\n")
+tmp <- subset(nhanes_htn, age_group == g)
+tab <- table(tmp$hypertension, tmp$smoking)
+print(tab)
+if (all(dim(tab) == c(2, 2))) {
+print(chisq.test(tab))
+} else {
+cat("Not a full 2x2 table (some levels missing); Chi-square skipped.\n")
+}
+}
+
+```
+
+```{r}
+for (g in age_groups) {
+cat("\n============================\n")
+cat("Age group:", g, "— Alcohol vs HTN\n")
+tmp <- subset(nhanes_htn, age_group == g)
+tab <- table(tmp$hypertension, tmp$alcohol_12mo)
+print(tab)
+if (all(dim(tab) == c(2, 2))) {
+print(chisq.test(tab))
+} else {
+cat("Not a full 2x2 table (some levels missing); Chi-square skipped.\n")
+}
+}
+
+```
+
+```{r}
+# ---- 10.1 Fit logistic regression model ----
+
+logit_full <- glm(
+hypertension ~ smoking + alcohol_12mo + passive_smoke +
+bmi + age + gender + education + marital_status,
+data   = nhanes_htn,
+family = binomial
+)
+
+summary(logit_full)
+
+```
+
+
+```{r}
+# ---- 10.2 OR table ----
+
+or_table <- broom::tidy(
+logit_full,
+exponentiate = TRUE,
+conf.int    = TRUE
+)
+
+or_table
+
+# In the Rmd you can display nicely:
+
+# knitr::kable(or_table, digits = 3, caption = "Adjusted Odds Ratios for Hypertension")
+
+```
+
+
+
+```{r}
+# ---- 11.1 Predicted probabilities & classes ----
+
+nhanes_htn <- nhanes_htn %>%
+mutate(
+pred_prob  = predict(logit_full, type = "response"),
+pred_class = if_else(pred_prob >= 0.5, "HTN", "No HTN") %>%
+factor(levels = levels(hypertension))
+)
+
+# ---- 11.2 Confusion matrix ----
+
+conf_mat <- table(
+Observed  = nhanes_htn$hypertension,
+Predicted = nhanes_htn$pred_class
+)
+conf_mat
+
+# ---- 11.3 Performance metrics ----
+
+accuracy    <- sum(diag(conf_mat)) / sum(conf_mat)
+sensitivity <- conf_mat["HTN", "HTN"] / sum(conf_mat["HTN", ])
+specificity <- conf_mat["No HTN", "No HTN"] / sum(conf_mat["No HTN", ])
+
+accuracy
+sensitivity
+specificity
+
+# ---- 11.4 ROC curve & AUC ----
+
+roc_htn   <- roc(nhanes_htn$hypertension, nhanes_htn$pred_prob)
+auc_value <- auc(roc_htn)
+auc_value
+
+plot(roc_htn, print.auc = TRUE, main = "ROC Curve for Hypertension Model")
+
+```
+
+
+
+```{r}
+summary_table <- tibble::tibble(
+variable  = c("Age (HTN vs No HTN)",
+"BMI (HTN vs No HTN)",
+"Smoking vs Hypertension",
+"Alcohol vs Hypertension",
+"Passive smoking vs Hypertension"),
+test      = c("Two-sample t-test",
+"Two-sample t-test",
+"Chi-square test of independence",
+"Chi-square test of independence",
+"Chi-square test of independence"),
+statistic = c(unname(tt_age$statistic),
+unname(tt_bmi$statistic),
+unname(chisq_smoke$statistic),
+unname(chisq_alcohol$statistic),
+unname(chisq_passive$statistic)),
+p_value   = c(tt_age$p.value,
+tt_bmi$p.value,
+chisq_smoke$p.value,
+chisq_alcohol$p.value,
+chisq_passive$p.value)
+) %>%
+mutate(
+significant_0_05 = if_else(p_value < 0.05, "Yes", "No")
+)
+
+summary_table
+
+# In Rmd:
+
+# knitr::kable(summary_table, digits = 3,
+
+# caption = "Summary of statistical tests for hypertension.")
+
+```
+
